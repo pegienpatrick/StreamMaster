@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.github.faucamp.simplertmp.RtmpHandler;
@@ -54,8 +55,8 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     private SrsPublisher mPublisher;
     private SrsCameraView mCameraView;
 
-    private int mWidth = 640;
-    private int mHeight = 480;
+    private int mWidth = 3840;
+    private int mHeight = 2160;
     private boolean isPermissionGranted = false;
 
     @Override
@@ -123,12 +124,14 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         btnPause.setEnabled(false);
         mCameraView = (SrsCameraView) findViewById(R.id.glsurfaceview_camera);
 
+        final TextView status = findViewById(R.id.status);
+
         mPublisher = new SrsPublisher(mCameraView);
         mPublisher.setEncodeHandler(new SrsEncodeHandler(this));
         mPublisher.setRtmpHandler(new RtmpHandler(this));
         mPublisher.setRecordHandler(new SrsRecordHandler(this));
         mPublisher.setPreviewResolution(mWidth, mHeight);
-        mPublisher.setOutputResolution(mHeight, mWidth); // 这里要和preview反过来
+        mPublisher.setOutputResolution(mWidth, mHeight); // 这里要和preview反过来
         mPublisher.setVideoHDMode();
         mPublisher.startCamera();
 
@@ -138,6 +141,10 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
                 //params.setFocusMode("custom-focus");
                 //params.setWhiteBalance("custom-balance");
                 //etc...
+                ;
+                params.getPictureSize();
+
+                status.setText(String.format("%d fps %d x %d ",params.getPreviewFrameRate(),params.getPictureSize().width,params.getPictureSize().height));
             }
         });
 
