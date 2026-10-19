@@ -10,6 +10,7 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.Surface;
 
 import com.seu.magicfilter.base.gpuimage.GPUImageFilter;
@@ -124,7 +125,7 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
             //mPreviewWidth changed but onSurfaceCreated fired after enable encoding (mIsEncoding == true)
             //could be calling magicFilter.onInputSizeChanged(width, height) in setPreviewResolution() after changing mGLPreviewBuffer?
             //or start the encoder only after onSurfaceCreated ...            
-            Log.e(TAG, String.format("Surface dimensions differ from Preview. May be a buffer overflow. Surface: %dx%d, Preview: %dx%d ", mSurfaceWidth, mSurfaceHeight, mPreviewWidth, mPreviewHeight));
+            Log.e("Camera view", String.format("Surface dimensions differ from Preview. May be a buffer overflow. Surface: %dx%d, Preview: %dx%d ", mSurfaceWidth, mSurfaceHeight, mPreviewWidth, mPreviewHeight));
             return;
         }        
         

@@ -8,7 +8,6 @@ import android.content.res.Configuration;
 import android.hardware.Camera;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -29,6 +28,7 @@ import net.ossrs.yasea.SrsEncodeHandler;
 import net.ossrs.yasea.SrsPublisher;
 import net.ossrs.yasea.SrsRecordHandler;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.SocketException;
 import java.util.Random;
@@ -47,7 +47,9 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
 
     private SharedPreferences sp;
     private String rtmpUrl = "rtmp://ossrs.net/" + getRandomAlphaString(3) + '/' + getRandomAlphaDigitString(5);
-    private String recPath = Environment.getExternalStorageDirectory().getPath() + "/test.mp4";
+    // Recorded to the app-specific external dir (no storage permission needed,
+    // and direct writes to /sdcard are blocked by scoped storage on API 29+).
+    private String recPath;
 
     private SrsPublisher mPublisher;
     private SrsCameraView mCameraView;
@@ -73,11 +75,10 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         //1. 检查是否已经有该权限
         if (Build.VERSION.SDK_INT >= 23 && (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED)) {
             //2. 权限没有开启，请求权限
             ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.WRITE_EXTERNAL_STORAGE}, RC_CAMERA);
+                    new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, RC_CAMERA);
         }else{
             //权限已经开启，做相应事情
             isPermissionGranted = true;
@@ -105,6 +106,10 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         // restore data.
         sp = getSharedPreferences("Yasea", MODE_PRIVATE);
         rtmpUrl = sp.getString("rtmpUrl", rtmpUrl);
+
+        // app-specific storage: works on every API level without permissions
+        File recDir = getExternalFilesDir(null);
+        recPath = new File(recDir != null ? recDir : getFilesDir(), "test.mp4").getAbsolutePath();
 
         // initialize url.
         final EditText efu = (EditText) findViewById(R.id.url);

@@ -1,16 +1,17 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 26
+    namespace 'net.ossrs.yasea.demo'
+    compileSdk 36
 
     defaultConfig {
         applicationId "net.ossrs.yasea.demo"
-        minSdkVersion 18
-        targetSdkVersion 26
+        minSdk 21
+        targetSdk 36
         versionCode 1
         versionName "2.6"
         ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "mips"
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86"
         }
     }
     // 签名配置

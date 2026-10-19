@@ -1,17 +1,20 @@
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 26
+    namespace 'net.ossrs.yasea'
+    compileSdk 36
+    // NDK 27: builds 16 KB page-size-compatible libs (Play requirement for
+    // targetSdk 35+). Its minimum supported platform is android-21.
+    ndkVersion "27.1.12297006"
 
     defaultConfig {
-        minSdkVersion 18
-        targetSdkVersion 26
+        minSdk 21
         versionCode 1
         versionName "2.6"
 
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "mips"
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86"
         }
     }
     buildTypes {
@@ -20,12 +23,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    // uncomment these lines to compile so files
-//    externalNativeBuild {
-//        ndkBuild {
-//            path 'src/main/cpp/Android.mk'
-//        }
-//    }
+    // compile the .so files (libyuv + libenc) from src/main/cpp, otherwise the
+    // APK is shipped without any native library and System.loadLibrary() crashes
+    externalNativeBuild {
+        ndkBuild {
+            path 'src/main/cpp/Android.mk'
+        }
+    }
 }
 
 dependencies {

@@ -1,5 +1,6 @@
 package net.ossrs.yasea;
 
+import android.annotation.SuppressLint;
 import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.media.AudioFormat;
