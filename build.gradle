@@ -21,6 +21,14 @@ allprojects {
         google()
         mavenCentral()
     }
+    // appcompat pulls mixed kotlin-stdlib versions; align them (project is Java-only)
+    configurations.all {
+        resolutionStrategy.eachDependency { d ->
+            if (d.requested.group == 'org.jetbrains.kotlin' && d.requested.name.startsWith('kotlin-stdlib')) {
+                d.useVersion '1.8.22'
+            }
+        }
+    }
 }
 
 task clean(type: Delete) {

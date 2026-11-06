@@ -44,7 +44,7 @@ import java.util.regex.Pattern;
 public class RtmpConnection implements RtmpPublisher {
 
     private static final String TAG = "RtmpConnection";
-    private static final Pattern rtmpUrlPattern = Pattern.compile("^rtmp://([^/:]+)(:(\\d+))*/([^/]+)(/(.*))*$");
+    private static final Pattern rtmpUrlPattern = Pattern.compile("^(rtmps?)://([^/:]+)(:(\\d+))*/([^/]+)(/(.*))*$");
 
     private RtmpHandler mHandler;
     private int port;
@@ -56,6 +56,7 @@ public class RtmpConnection implements RtmpPublisher {
     private String tcUrl;
     private String pageUrl;
     private Socket socket;
+    private boolean secure;
     private String srsServerInfo = "";
     private String socketExceptionCause = "";
     private RtmpSessionInfo rtmpSessionInfo;
@@ -105,20 +106,21 @@ public class RtmpConnection implements RtmpPublisher {
             tcUrl = url.substring(0, url.lastIndexOf('/'));
             swfUrl = "";
             pageUrl = "";
-            host = matcher.group(1);
-            String portStr = matcher.group(3);
-            port = portStr != null ? Integer.parseInt(portStr) : 1935;
-            appName = matcher.group(4);
-            streamName = matcher.group(6);
+            secure = "rtmps".equalsIgnoreCase(matcher.group(1));
+            host = matcher.group(2);
+            String portStr = matcher.group(4);
+            port = portStr != null ? Integer.parseInt(portStr) : (secure ? 443 : 1935);
+            appName = matcher.group(5);
+            streamName = matcher.group(7);
         } else {
             mHandler.notifyRtmpIllegalArgumentException(new IllegalArgumentException(
-                "Invalid RTMP URL. Must be in format: rtmp://host[:port]/application/streamName"));
+                "Invalid RTMP URL. Must be in format: rtmp[s]://host[:port]/application/streamName"));
             return false;
         }
 
         if (appName == null || streamName == null) {
             mHandler.notifyRtmpIllegalArgumentException(new IllegalArgumentException(
-                "Invalid RTMP URL. Must be in format: rtmp://host[:port]/application/streamName"));
+                "Invalid RTMP URL. Must be in format: rtmp[s]://host[:port]/application/streamName"));
             return false;
         }
 
@@ -130,6 +132,20 @@ public class RtmpConnection implements RtmpPublisher {
         SocketAddress socketAddress = new InetSocketAddress(host, port);
         try {
             socket.connect(socketAddress, 3000);
+            if (secure) {
+                // RTMPS: TLS over the TCP socket, certificate + hostname verified
+                // against the system trust store.
+                javax.net.ssl.SSLSocket ssl = (javax.net.ssl.SSLSocket)
+                    ((javax.net.ssl.SSLSocketFactory) javax.net.ssl.SSLSocketFactory.getDefault())
+                        .createSocket(socket, host, port, true);
+                javax.net.ssl.SSLParameters params = ssl.getSSLParameters();
+                params.setEndpointIdentificationAlgorithm("HTTPS");
+                ssl.setSSLParameters(params);
+                ssl.setSoTimeout(10000);
+                ssl.startHandshake();
+                ssl.setSoTimeout(0);
+                socket = ssl;
+            }
             inputStream = new BufferedInputStream(socket.getInputStream());
             outputStream = new BufferedOutputStream(socket.getOutputStream());
             Log.d(TAG, "connect(): socket connection established, doing handhake...");

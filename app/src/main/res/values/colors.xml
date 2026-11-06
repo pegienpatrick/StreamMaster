@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#3F51B5</color>
-    <color name="colorPrimaryDark">#303F9F</color>
-    <color name="colorAccent">#FF4081</color>
+    <color name="colorPrimary">#6C5CE7</color>
+    <color name="colorPrimaryDark">#0B0D12</color>
+    <color name="colorAccent">#FF4D6A</color>
+    <color name="surface">#14171F</color>
+    <color name="surface_high">#1E222C</color>
+    <color name="on_surface">#ECEEF4</color>
+    <color name="on_surface_dim">#9AA1B2</color>
+    <color name="live_red">#FF3B58</color>
+    <color name="ok_green">#2ED47A</color>
+    <color name="warn_amber">#FFB020</color>
+    <color name="scrim">#99000000</color>
 </resources>

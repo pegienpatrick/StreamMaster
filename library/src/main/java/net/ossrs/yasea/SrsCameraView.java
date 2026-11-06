@@ -336,7 +336,7 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
         Camera.Parameters params = mCamera.getParameters();
         //params.setPictureSize(mPreviewWidth, mPreviewHeight);
         params.setPreviewSize(mPreviewWidth, mPreviewHeight);
-        int[] range = adaptFpsRange(SrsEncoder.VFPS, params.getSupportedPreviewFpsRange());
+        int[] range = adaptFpsRange(SrsEncoder.vFps, params.getSupportedPreviewFpsRange());
         params.setPreviewFpsRange(range[0], range[1]);
         params.setPreviewFormat(ImageFormat.NV21);
         params.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);

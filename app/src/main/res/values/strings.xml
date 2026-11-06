@@ -1,3 +1,9 @@
 <resources>
-    <string name="app_name">Yasea</string>
+    <string name="app_name">StreamMaster</string>
+    <string name="publish">Publish to RTMP</string>
+    <string name="pause">Pause</string>
+    <string name="record">Start or stop recording</string>
+    <string name="switch_camera">Switch camera</string>
+    <string name="recording">Recording</string>
+    <string name="rtmp_url_hint">rtmp://server/app/stream</string>
 </resources>

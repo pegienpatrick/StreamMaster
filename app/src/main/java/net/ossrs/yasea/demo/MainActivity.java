@@ -8,16 +8,20 @@ import android.content.res.Configuration;
 import android.hardware.Camera;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AppCompatActivity;
+import android.os.Handler;
+import android.os.Looper;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.appcompat.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
+import android.view.animation.AnimationUtils;
 import android.widget.EditText;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,6 +36,11 @@ import net.ossrs.yasea.SrsRecordHandler;
 import java.io.File;
 import java.io.IOException;
 import java.net.SocketException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 
 public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpListener,
@@ -40,24 +49,56 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     private static final String TAG = "Yasea";
     public final static int RC_CAMERA = 100;
 
-    private Button btnPublish;
-    private Button btnSwitchCamera;
-    private Button btnRecord;
-    private Button btnSwitchEncoder;
-    private Button btnPause;
+    private ImageButton btnPublish;
+    private ImageButton btnSwitchCamera;
+    private ImageButton btnRecord;
+    private ImageButton btnPause;
+
+    // Live recording readout.
+    private View recordingChip;
+    private ImageView recordingDot;
+    private TextView recordingTimer;
+    private TextView recordingSize;
+    private TextView recordingFormat;
+    private TextView status;
+
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private long recordingStartMs;
+    private long recordingElapsedMs;   // accumulated across pauses
+    private long lastResumeMs;
 
     private SharedPreferences sp;
     private String rtmpUrl = "rtmp://ossrs.net/" + getRandomAlphaString(3) + '/' + getRandomAlphaDigitString(5);
     // Recorded to the app-specific external dir (no storage permission needed,
     // and direct writes to /sdcard are blocked by scoped storage on API 29+).
     private String recPath;
+    private String recFileName;
+    private File recDir;
 
     private SrsPublisher mPublisher;
     private SrsCameraView mCameraView;
 
+    // Requested capture size. This is a *preference*: SrsPublisher clamps it to the
+    // largest size the device's hardware encoder can actually encode, so asking for
+    // 4K on a device with a 1080p encoder degrades gracefully instead of failing.
     private int mWidth = 3840;
     private int mHeight = 2160;
     private boolean isPermissionGranted = false;
+
+    private boolean isPublishing = false;
+    private boolean isRecording = false;
+    private boolean isRecordingPaused = false;
+
+    // Restarts the readout while a recording is live.
+    private final Runnable readoutTick = new Runnable() {
+        @Override
+        public void run() {
+            updateRecordingReadout();
+            if (isRecording && !isRecordingPaused) {
+                uiHandler.postDelayed(this, 500);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,18 +114,30 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     }
 
     private void requestPermission() {
-        //1. 检查是否已经有该权限
-        if (Build.VERSION.SDK_INT >= 23 && (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                != PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED)) {
-            //2. 权限没有开启，请求权限
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, RC_CAMERA);
-        }else{
-            //权限已经开启，做相应事情
-            isPermissionGranted = true;
-            init();
+        if (Build.VERSION.SDK_INT >= 23) {
+            List<String> needed = new ArrayList<>();
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.CAMERA);
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.RECORD_AUDIO);
+            }
+            // Only needed to write into Movies/Yasea below API 29; 29+ uses MediaStore.
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P
+                    && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            }
+            if (!needed.isEmpty()) {
+                ActivityCompat.requestPermissions(this,
+                        needed.toArray(new String[0]), RC_CAMERA);
+                return;
+            }
         }
+        isPermissionGranted = true;
+        init();
     }
 
     //3. 接收申请成功或者失败回调
@@ -92,15 +145,38 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == RC_CAMERA) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                //权限被用户同意,做相应的事情
+            // Require the capture permissions; storage is a nice-to-have, because a
+            // denial only means the file stays in the app folder.
+            boolean cameraGranted = true;
+            boolean audioGranted = true;
+            for (int i = 0; i < permissions.length; i++) {
+                boolean granted = i < grantResults.length
+                        && grantResults[i] == PackageManager.PERMISSION_GRANTED;
+                if (Manifest.permission.CAMERA.equals(permissions[i])) {
+                    cameraGranted = granted;
+                } else if (Manifest.permission.RECORD_AUDIO.equals(permissions[i])) {
+                    audioGranted = granted;
+                }
+            }
+            if (cameraGranted && audioGranted) {
                 isPermissionGranted = true;
                 init();
             } else {
-                //权限被用户拒绝，做相应的事情
                 finish();
             }
         }
+    }
+
+    /**
+     * Builds a fresh, date-stamped mp4 path inside the temporary recording folder.
+     * The file lives here only while recording; once finished it is published to
+     * Movies/Yasea (see {@link MovieSaver}).
+     */
+    private String newRecordPath() {
+        File dir = recDir != null ? recDir : getFilesDir();
+        recFileName = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
+                .format(new Date()) + ".mp4";
+        return new File(dir, recFileName).getAbsolutePath();
     }
 
     private void init() {
@@ -108,50 +184,61 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         sp = getSharedPreferences("Yasea", MODE_PRIVATE);
         rtmpUrl = sp.getString("rtmpUrl", rtmpUrl);
 
-        // app-specific storage: works on every API level without permissions
-        File recDir = getExternalFilesDir(null);
-        recPath = new File(recDir != null ? recDir : getFilesDir(), "test.mp4").getAbsolutePath();
+        // Staging area while recording. The finished file is moved into
+        // Movies/Yasea by MovieSaver, so nothing is meant to stay here.
+        recDir = getExternalCacheDir();
+        if (recDir == null) {
+            recDir = getCacheDir();
+        }
+        recPath = newRecordPath();
 
         // initialize url.
         final EditText efu = (EditText) findViewById(R.id.url);
         efu.setText(rtmpUrl);
 
-        btnPublish = (Button) findViewById(R.id.publish);
-        btnSwitchCamera = (Button) findViewById(R.id.swCam);
-        btnRecord = (Button) findViewById(R.id.record);
-        btnSwitchEncoder = (Button) findViewById(R.id.swEnc);
-        btnPause = (Button) findViewById(R.id.pause);
+        btnPublish = (ImageButton) findViewById(R.id.publish);
+        btnSwitchCamera = (ImageButton) findViewById(R.id.swCam);
+        btnRecord = (ImageButton) findViewById(R.id.record);
+        btnPause = (ImageButton) findViewById(R.id.pause);
         btnPause.setEnabled(false);
-        mCameraView = (SrsCameraView) findViewById(R.id.glsurfaceview_camera);
 
-        final TextView status = findViewById(R.id.status);
+        recordingChip = findViewById(R.id.recording_chip);
+        recordingDot = (ImageView) findViewById(R.id.recording_dot);
+        recordingTimer = (TextView) findViewById(R.id.recording_timer);
+        recordingSize = (TextView) findViewById(R.id.recording_size);
+        recordingFormat = (TextView) findViewById(R.id.recording_format);
+        status = (TextView) findViewById(R.id.status);
+
+        mCameraView = (SrsCameraView) findViewById(R.id.glsurfaceview_camera);
 
         mPublisher = new SrsPublisher(mCameraView);
         mPublisher.setEncodeHandler(new SrsEncodeHandler(this));
         mPublisher.setRtmpHandler(new RtmpHandler(this));
         mPublisher.setRecordHandler(new SrsRecordHandler(this));
-        mPublisher.setPreviewResolution(mWidth, mHeight);
-        mPublisher.setOutputResolution(mWidth, mHeight); // 这里要和preview反过来
         mPublisher.setVideoHDMode();
+
+        // Set the capture resolution first (clamped to what the encoder supports),
+        // then request the frame rate. Order matters: the HD mode helper resets the
+        // bitrate, and the bitrate is then scaled to the final resolution.
+        mPublisher.setPreviewResolution(mWidth, mHeight);
+        mPublisher.setOutputResolution(mWidth, mHeight);
+        mPublisher.setVideoFps(30);
         mPublisher.startCamera();
 
         mCameraView.setCameraCallbacksHandler(new SrsCameraView.CameraCallbacksHandler(){
             @Override
             public void onCameraParameters(Camera.Parameters params) {
-                //params.setFocusMode("custom-focus");
-                //params.setWhiteBalance("custom-balance");
-                //etc...
-                ;
+                // Legacy callback: only fires on the Camera1 path.
                 params.getPictureSize();
-
-                status.setText(String.format("%d fps %d x %d ",params.getPreviewFrameRate(),params.getPictureSize().width,params.getPictureSize().height));
             }
         });
+
+        refreshStatus();
 
         btnPublish.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (btnPublish.getText().toString().contentEquals("publish")) {
+                if (!isPublishing) {
                     rtmpUrl = efu.getText().toString();
                     SharedPreferences.Editor editor = sp.edit();
                     editor.putString("rtmpUrl", rtmpUrl);
@@ -160,33 +247,34 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
                     mPublisher.startPublish(rtmpUrl);
                     mPublisher.startCamera();
 
-                    if (btnSwitchEncoder.getText().toString().contentEquals("soft encoder")) {
-                        Toast.makeText(getApplicationContext(), "Use hard encoder", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(getApplicationContext(), "Use soft encoder", Toast.LENGTH_SHORT).show();
-                    }
-                    btnPublish.setText("stop");
-                    btnSwitchEncoder.setEnabled(false);
+                    isPublishing = true;
+                    btnPublish.setImageResource(R.drawable.ic_publish_stop);
                     btnPause.setEnabled(true);
-                } else if (btnPublish.getText().toString().contentEquals("stop")) {
+                } else {
                     mPublisher.stopPublish();
-                    mPublisher.stopRecord();
-                    btnPublish.setText("publish");
-                    btnRecord.setText("record");
-                    btnSwitchEncoder.setEnabled(true);
+                    // A publish stop must not silently kill a recording: stop both
+                    // and reflect that in the UI.
+                    if (isRecording) {
+                        stopRecording();
+                    }
+                    isPublishing = false;
+                    btnPublish.setImageResource(R.drawable.ic_publish);
                     btnPause.setEnabled(false);
                 }
             }
         });
+
         btnPause.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if(btnPause.getText().toString().equals("Pause")){
+                if (btnPause.getTag() == null || !(Boolean) btnPause.getTag()) {
                     mPublisher.pausePublish();
-                    btnPause.setText("resume");
-                }else{
+                    btnPause.setTag(Boolean.TRUE);
+                    btnPause.setImageResource(R.drawable.ic_record); // resume glyph slot
+                } else {
                     mPublisher.resumePublish();
-                    btnPause.setText("Pause");
+                    btnPause.setTag(Boolean.FALSE);
+                    btnPause.setImageResource(R.drawable.ic_pause);
                 }
             }
         });
@@ -194,39 +282,119 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         btnSwitchCamera.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mPublisher.switchCameraFace((mPublisher.getCameraId() + 1) % Camera.getNumberOfCameras());
+                int count = Camera.getNumberOfCameras();
+                if (count <= 1) {
+                    return;
+                }
+                int next = (mPublisher.getCameraId() + 1) % count;
+                mPublisher.switchCameraFace(next);
+                refreshStatus();
             }
         });
 
         btnRecord.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (btnRecord.getText().toString().contentEquals("record")) {
-                    if (mPublisher.startRecord(recPath)) {
-                        btnRecord.setText("pause");
-                    }
-                } else if (btnRecord.getText().toString().contentEquals("pause")) {
-                    mPublisher.pauseRecord();
-                    btnRecord.setText("resume");
-                } else if (btnRecord.getText().toString().contentEquals("resume")) {
-                    mPublisher.resumeRecord();
-                    btnRecord.setText("pause");
+                if (!isRecording) {
+                    startRecording();
+                } else {
+                    stopRecording();
                 }
             }
         });
+    }
 
-        btnSwitchEncoder.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (btnSwitchEncoder.getText().toString().contentEquals("soft encoder")) {
-                    mPublisher.switchToSoftEncoder();
-                    btnSwitchEncoder.setText("hard encoder");
-                } else if (btnSwitchEncoder.getText().toString().contentEquals("hard encoder")) {
-                    mPublisher.switchToHardEncoder();
-                    btnSwitchEncoder.setText("soft encoder");
-                }
+    private void startRecording() {
+        // New file per recording, named with the date/time, in the app-specific
+        // folder (no storage permission required).
+        recPath = newRecordPath();
+        if (!mPublisher.startRecord(recPath)) {
+            Toast.makeText(getApplicationContext(),
+                    "Failed to start recording", Toast.LENGTH_LONG).show();
+            return;
+        }
+        isRecording = true;
+        isRecordingPaused = false;
+        recordingStartMs = System.currentTimeMillis();
+        lastResumeMs = recordingStartMs;
+        recordingElapsedMs = 0;
+
+        // Animated state change: the record button pops and turns into a stop square.
+        btnRecord.setImageResource(R.drawable.ic_record_stop);
+        btnRecord.startAnimation(AnimationUtils.loadAnimation(this, R.anim.record_pop));
+
+        recordingChip.setVisibility(View.VISIBLE);
+        refreshStatus();
+        uiHandler.post(readoutTick);
+    }
+
+    private void stopRecording() {
+        mPublisher.stopRecord();
+        isRecording = false;
+        isRecordingPaused = false;
+        uiHandler.removeCallbacks(readoutTick);
+        recordingChip.setVisibility(View.GONE);
+        btnRecord.setImageResource(R.drawable.ic_record);
+        btnRecord.startAnimation(AnimationUtils.loadAnimation(this, R.anim.record_pop));
+        refreshStatus();
+    }
+
+    /** Refreshes timer, file size and format while a recording is live. */
+    private void updateRecordingReadout() {
+        long elapsed;
+        if (isRecordingPaused) {
+            elapsed = recordingElapsedMs;
+        } else {
+            elapsed = recordingElapsedMs + (System.currentTimeMillis() - lastResumeMs);
+        }
+
+        long seconds = elapsed / 1000;
+        recordingTimer.setText(String.format(Locale.US, "%02d:%02d",
+                seconds / 60, seconds % 60));
+
+        long bytes = mPublisher.getRecordedBytes();
+        recordingSize.setText(String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0)));
+
+        int w = mPublisher.getCaptureWidth();
+        int h = mPublisher.getCaptureHeight();
+        int fps = mPublisher.getCaptureFps();
+        if (w > 0 && h > 0 && fps > 0) {
+            recordingFormat.setText(String.format(Locale.US, "%dx%d %dfps", w, h, fps));
+        } else {
+            recordingFormat.setText("");
+        }
+
+        if (isRecordingPaused) {
+            recordingDot.clearAnimation();
+            recordingDot.setAlpha(0.3f);
+        } else {
+            recordingDot.setAlpha(1.0f);
+            if (recordingDot.getAnimation() == null) {
+                recordingDot.startAnimation(
+                        AnimationUtils.loadAnimation(this, R.anim.blink));
             }
-        });
+        }
+    }
+
+    /** Small always-on readout of capture size, fps and encoder mode. */
+    private void refreshStatus() {
+        if (mPublisher == null) {
+            return;
+        }
+        int w = mPublisher.getCaptureWidth();
+        int h = mPublisher.getCaptureHeight();
+        int fps = mPublisher.getCaptureFps();
+        StringBuilder sb = new StringBuilder();
+        if (w > 0 && h > 0) {
+            sb.append(w).append('x').append(h);
+        }
+        if (fps > 0) {
+            sb.append(' ').append(fps).append("fps");
+        }
+        if (w <= 0 && h <= 0) {
+            sb.append("starting camera...");
+        }
+        status.setText(sb.toString());
     }
 
     @Override
@@ -243,68 +411,39 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
 
-        //noinspection SimplifiableIfStatement
-        if (id == R.id.action_settings) {
-            return true;
-        } else {
-            switch (id) {
-                case R.id.cool_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.COOL);
-                    break;
-                case R.id.beauty_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.BEAUTY);
-                    break;
-                case R.id.early_bird_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.EARLYBIRD);
-                    break;
-                case R.id.evergreen_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.EVERGREEN);
-                    break;
-                case R.id.n1977_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.N1977);
-                    break;
-                case R.id.nostalgia_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.NOSTALGIA);
-                    break;
-                case R.id.romance_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.ROMANCE);
-                    break;
-                case R.id.sunrise_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.SUNRISE);
-                    break;
-                case R.id.sunset_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.SUNSET);
-                    break;
-                case R.id.tender_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.TENDER);
-                    break;
-                case R.id.toast_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.TOASTER2);
-                    break;
-                case R.id.valencia_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.VALENCIA);
-                    break;
-                case R.id.walden_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.WALDEN);
-                    break;
-                case R.id.warm_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.WARM);
-                    break;
-                case R.id.original_filter:
-                default:
-                    mPublisher.switchCameraFilter(MagicFilterType.NONE);
-                    break;
-            }
+        MagicFilterType type = null;
+        switch (id) {
+            case R.id.cool_filter:      type = MagicFilterType.COOL; break;
+            case R.id.beauty_filter:    type = MagicFilterType.BEAUTY; break;
+            case R.id.early_bird_filter: type = MagicFilterType.EARLYBIRD; break;
+            case R.id.evergreen_filter: type = MagicFilterType.EVERGREEN; break;
+            case R.id.n1977_filter:     type = MagicFilterType.N1977; break;
+            case R.id.nostalgia_filter: type = MagicFilterType.NOSTALGIA; break;
+            case R.id.romance_filter:   type = MagicFilterType.ROMANCE; break;
+            case R.id.sunrise_filter:   type = MagicFilterType.SUNRISE; break;
+            case R.id.sunset_filter:    type = MagicFilterType.SUNSET; break;
+            case R.id.tender_filter:    type = MagicFilterType.TENDER; break;
+            case R.id.toast_filter:     type = MagicFilterType.TOASTER2; break;
+            case R.id.valencia_filter:  type = MagicFilterType.VALENCIA; break;
+            case R.id.walden_filter:    type = MagicFilterType.WALDEN; break;
+            case R.id.warm_filter:      type = MagicFilterType.WARM; break;
+            case R.id.original_filter:  type = MagicFilterType.NONE; break;
+            default:
+                return super.onOptionsItemSelected(item);
         }
-        setTitle(item.getTitle());
 
-        return super.onOptionsItemSelected(item);
+        // The legacy camera path applies filters live, without a restart.
+        mPublisher.switchCameraFilter(type);
+        setTitle(item.getTitle());
+        refreshStatus();
+
+        return true;
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        if(mPublisher.getCamera() == null && isPermissionGranted){
+        if(mPublisher != null && mPublisher.getCamera() == null && isPermissionGranted){
             //if the camera was busy and available again
             mPublisher.startCamera();
         }
@@ -313,22 +452,43 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     @Override
     protected void onResume() {
         super.onResume();
-        final Button btn = (Button) findViewById(R.id.publish);
-        btn.setEnabled(true);
+        if (mPublisher == null) {
+            return;
+        }
+        btnPublish.setEnabled(true);
         mPublisher.resumeRecord();
+        if (isRecording) {
+            isRecordingPaused = false;
+            lastResumeMs = System.currentTimeMillis();
+            uiHandler.removeCallbacks(readoutTick);
+            uiHandler.post(readoutTick);
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        if (mPublisher == null) {
+            return;
+        }
+        // Pausing the activity must not lose the recording: accumulate elapsed time
+        // and stop the readout until we resume.
         mPublisher.pauseRecord();
+        if (isRecording) {
+            recordingElapsedMs += System.currentTimeMillis() - lastResumeMs;
+            isRecordingPaused = true;
+        }
+        uiHandler.removeCallbacks(readoutTick);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        mPublisher.stopPublish();
-        mPublisher.stopRecord();
+        uiHandler.removeCallbacks(readoutTick);
+        if (mPublisher != null) {
+            mPublisher.stopPublish();
+            mPublisher.stopRecord();
+        }
     }
 
     @Override
@@ -336,12 +496,15 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         super.onConfigurationChanged(newConfig);
         mPublisher.stopEncode();
         mPublisher.stopRecord();
-        btnRecord.setText("record");
+        isRecording = false;
+        isRecordingPaused = false;
+        recordingChip.setVisibility(View.GONE);
+        btnRecord.setImageResource(R.drawable.ic_record);
         mPublisher.setScreenOrientation(newConfig.orientation);
-        if (btnPublish.getText().toString().contentEquals("stop")) {
+        mPublisher.startCamera();
+        if (isPublishing) {
             mPublisher.startEncode();
         }
-        mPublisher.startCamera();
     }
 
     private static String getRandomAlphaString(int length) {
@@ -371,9 +534,15 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
             Toast.makeText(getApplicationContext(), e.getMessage(), Toast.LENGTH_SHORT).show();
             mPublisher.stopPublish();
             mPublisher.stopRecord();
-            btnPublish.setText("publish");
-            btnRecord.setText("record");
-            btnSwitchEncoder.setEnabled(true);
+            isPublishing = false;
+            isRecording = false;
+            isRecordingPaused = false;
+            uiHandler.removeCallbacks(readoutTick);
+            recordingChip.setVisibility(View.GONE);
+            btnPublish.setImageResource(R.drawable.ic_publish);
+            btnRecord.setImageResource(R.drawable.ic_record);
+            btnPause.setEnabled(false);
+            refreshStatus();
         } catch (Exception e1) {
             //
         }
@@ -458,22 +627,52 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
 
     @Override
     public void onRecordPause() {
-        Toast.makeText(getApplicationContext(), "Record paused", Toast.LENGTH_SHORT).show();
+        // The activity drives this itself; no toast to avoid noise on every pause.
     }
 
     @Override
     public void onRecordResume() {
-        Toast.makeText(getApplicationContext(), "Record resumed", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     public void onRecordStarted(String msg) {
-        Toast.makeText(getApplicationContext(), "Recording file: " + msg, Toast.LENGTH_SHORT).show();
+        Log.i(TAG, "Recording to " + msg);
     }
 
     @Override
     public void onRecordFinished(String msg) {
-        Toast.makeText(getApplicationContext(), "MP4 file saved: " + msg, Toast.LENGTH_SHORT).show();
+        // The muxer has closed the file, so it is complete and playable now. Move it
+        // from the temp folder into Movies/Yasea so it is easy to find and survives
+        // uninstalling the app. Copying a large file takes time, so keep it off the
+        // UI thread.
+        final File temp = new File(msg);
+        final String displayName = recFileName != null ? recFileName : temp.getName();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String shown = MovieSaver.publish(
+                        getApplicationContext(), temp, displayName);
+                final long bytes = temp.exists() ? temp.length() : 0;
+                uiHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (shown != null) {
+                            Toast.makeText(getApplicationContext(),
+                                    "Saved to " + shown, Toast.LENGTH_LONG).show();
+                        } else {
+                            // Publishing failed, but the recording itself is intact in
+                            // the temp folder: say where, instead of claiming success.
+                            String size = String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0));
+                            Toast.makeText(getApplicationContext(),
+                                    "Saved to " + temp.getAbsolutePath() + " (" + size
+                                            + "); could not move to Movies/Yasea",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                        refreshStatus();
+                    }
+                });
+            }
+        }, "MovieSaver").start();
     }
 
     @Override

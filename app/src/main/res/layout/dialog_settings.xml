@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfiles"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:text="Profiles: save, load, share" />
+
+        <EditText
+            android:id="@+id/setUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="rtmp:// or rtmps://server/app/key"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:maxLines="2" />
+
+        <TextView style="@style/SettingLabel" android:text="Quality" />
+        <TextView android:id="@+id/capNote" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/on_surface_dim" android:textSize="11sp" />
+        <Spinner android:id="@+id/setQuality" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Frame rate" />
+        <Spinner android:id="@+id/setFps" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Orientation" />
+        <Spinner android:id="@+id/setOrientation" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/SettingLabel" android:text="Video bitrate (kbps, 0 = automatic)" />
+        <EditText
+            android:id="@+id/setBitrate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:importantForAutofill="no"
+            android:inputType="number" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setAdaptive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Adapt bitrate to network" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setPip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Picture-in-picture when I open another app" />
+
+        <TextView style="@style/SettingLabel" android:text="KIOSK" android:layout_marginTop="22dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setKiosk"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Kiosk mode (locks the screen to this app)" />
+
+        <EditText
+            android:id="@+id/setKioskPin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Exit PIN (4+ digits, needed to leave kiosk)"
+            android:importantForAutofill="no"
+            android:inputType="numberPassword"
+            android:maxLength="12" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setKioskAuto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start streaming automatically" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setKioskRec"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Record automatically" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setKioskDark"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Darken the screen" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/setKioskBoot"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Start on device boot" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnKioskHelp"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="How to exit kiosk mode" />
+    </LinearLayout>
+</ScrollView>

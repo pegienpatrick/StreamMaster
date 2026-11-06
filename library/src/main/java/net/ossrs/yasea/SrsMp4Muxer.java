@@ -85,6 +85,8 @@ public class SrsMp4Muxer {
     private volatile boolean bRecording = false;
     private volatile boolean bPaused = false;
     private volatile boolean needToFindKeyFrame = true;
+    private volatile boolean videoTrackAdded = false;
+    private volatile boolean audioTrackAdded = false;
     private final Object writeLock = new Object();
     private ConcurrentLinkedQueue<SrsEsFrame> frameCache = new ConcurrentLinkedQueue<>();
 
@@ -118,18 +120,31 @@ public class SrsMp4Muxer {
         }
 
         mRecFile = outputFile;
-        createMovie(mRecFile);
-        mHandler.notifyRecordStarted(mRecFile.getPath());
+        // If the file cannot be opened there is nothing to record into. Report the
+        // failure instead of pretending to record and producing a 0-byte file.
+        if (!createMovie(mRecFile)) {
+            mRecFile = null;
+            return false;
+        }
 
-        if (!spsList.isEmpty() && !ppsList.isEmpty()) {
+        // The video track needs SPS/PPS, which may not have arrived yet. If they are
+        // already known add the track now, otherwise it is added on first SPS/PPS.
+        if (!spsList.isEmpty() && !ppsList.isEmpty() && videoFormat != null) {
             mp4Movie.addTrack(videoFormat, false);
+            videoTrackAdded = true;
         }
         mp4Movie.addTrack(audioFormat, true);
+        audioTrackAdded = true;
+
+        bRecording = true;
+        bPaused = false;
+        needToFindKeyFrame = true;
+
+        mHandler.notifyRecordStarted(mRecFile.getPath());
 
         worker = new Thread(new Runnable() {
             @Override
             public void run() {
-                bRecording = true;
                 while (bRecording) {
                     // Keep at least one audio and video frame in cache to ensure monotonically increasing.
                     while (!frameCache.isEmpty()) {
@@ -178,11 +193,18 @@ public class SrsMp4Muxer {
      * finish recording.
      */
     public void stop() {
+        if (!bRecording && worker == null) {
+            return;
+        }
+
         bRecording = false;
         bPaused = false;
         needToFindKeyFrame = true;
         aacSpecConfig = false;
-        frameCache.clear();
+        // wake the worker so it exits promptly instead of waiting out its timeout
+        synchronized (writeLock) {
+            writeLock.notifyAll();
+        }
 
         if (worker != null) {
             try {
@@ -193,9 +215,24 @@ public class SrsMp4Muxer {
             }
             worker = null;
 
+            // Drain whatever is still queued (stop() must NOT clear the cache: that
+            // races the worker and drops the tail of the recording).
+            while (!frameCache.isEmpty()) {
+                SrsEsFrame frame = frameCache.poll();
+                writeSampleData(frame.bb, frame.bi, frame.is_audio());
+            }
+
+            // Always finalize so the file gets a moov atom, otherwise it is unplayable.
             finishMovie();
-            mHandler.notifyRecordFinished(mRecFile.getPath());
+            if (mRecFile != null) {
+                mHandler.notifyRecordFinished(mRecFile.getPath());
+            }
         }
+        mRecFile = null;
+        videoTrackAdded = false;
+        audioTrackAdded = false;
+        recFileSize = 0;
+        flushBytes = 0;
         Log.i(TAG, "SrsMp4Muxer closed");
     }
 
@@ -223,11 +260,38 @@ public class SrsMp4Muxer {
      * @param bufferInfo The buffer information related to this sample.
      */
     public void writeSampleData(int trackIndex, ByteBuffer byteBuf, MediaCodec.BufferInfo bufferInfo) {
-        if (VIDEO_TRACK == trackIndex) {
-            writeVideoSample(byteBuf, bufferInfo);
-        } else {
-            writeAudioSample(byteBuf, bufferInfo);
+        // Normalise to offset 0. The muxer's demuxer and sample writer index the
+        // buffer from zero and treat BufferInfo.size as an absolute limit, so a
+        // non-zero codec offset (which does occur) would corrupt the output.
+        MediaCodec.BufferInfo bi = bufferInfo;
+        ByteBuffer buf = byteBuf;
+        if (bufferInfo.offset != 0) {
+            ByteBuffer dup = byteBuf.duplicate();
+            dup.position(bufferInfo.offset);
+            dup.limit(bufferInfo.offset + bufferInfo.size);
+            ByteBuffer slice = dup.slice();
+            bi = new MediaCodec.BufferInfo();
+            bi.set(0, bufferInfo.size, bufferInfo.presentationTimeUs, bufferInfo.flags);
+            buf = slice;
         }
+        if (VIDEO_TRACK == trackIndex) {
+            writeVideoSample(buf, bi);
+        } else {
+            writeAudioSample(buf, bi);
+        }
+    }
+
+    /** Bytes written to the recording file so far, or 0 when not recording. */
+    public long getRecordedBytes() {
+        return bRecording ? recFileSize : 0;
+    }
+
+    public boolean isRecording() {
+        return bRecording;
+    }
+
+    public boolean isPaused() {
+        return bPaused;
     }
 
     /**
@@ -276,11 +340,15 @@ public class SrsMp4Muxer {
     }
 
     private void writeVideoSample(final ByteBuffer bb, MediaCodec.BufferInfo bi) {
-        int nal_unit_type = bb.get(4) & 0x1f;
+        // Encoded samples may start at a non-zero offset inside the codec buffer.
+        // Normalise the read position so every index below (and the demuxer) is
+        // relative to the sample start rather than the buffer start.
+        bb.position(bi.offset);
+        int nal_unit_type = bb.get(bi.offset + 4) & 0x1f;
         if (nal_unit_type == SrsAvcNaluType.IDR || nal_unit_type == SrsAvcNaluType.NonIDR) {
             writeFrameByte(VIDEO_TRACK, bb, bi, nal_unit_type == SrsAvcNaluType.IDR);
         } else {
-            while (bb.position() < bi.size) {
+            while (bb.position() < bi.offset + bi.size) {
                 SrsEsFrameBytes frame = avc.annexb_demux(bb, bi);
 
                 if (avc.is_sps(frame)) {
@@ -290,6 +358,7 @@ public class SrsMp4Muxer {
                         h264_sps = ByteBuffer.wrap(sps);
                         spsList.clear();
                         spsList.add(sps);
+                        maybeAddVideoTrack();
                     }
                     continue;
                 }
@@ -301,11 +370,29 @@ public class SrsMp4Muxer {
                         h264_pps = ByteBuffer.wrap(pps);
                         ppsList.clear();
                         ppsList.add(pps);
+                        maybeAddVideoTrack();
                     }
                     continue;
                 }
             }
         }
+    }
+
+    /**
+     * Add the video track once both SPS and PPS are known. The encoder may not have
+     * emitted them yet when record() was called, so the track is added on first sight.
+     */
+    private void maybeAddVideoTrack() {
+        if (videoTrackAdded || videoFormat == null) {
+            return;
+        }
+        if (spsList.isEmpty() || ppsList.isEmpty()) {
+            return;
+        }
+        mp4Movie.addTrack(videoFormat, false);
+        videoTrackAdded = true;
+        // the first sample written must be the key frame following these SPS/PPS
+        needToFindKeyFrame = true;
     }
 
     private void writeAudioSample(final ByteBuffer bb, MediaCodec.BufferInfo bi) {
@@ -324,19 +411,35 @@ public class SrsMp4Muxer {
         frame.track = track;
 
         if (bRecording && !bPaused) {
-            if (needToFindKeyFrame) {
-                if (frame.isKeyFrame) {
-                    needToFindKeyFrame = false;
-                    frameCache.add(frame);
-                    synchronized (writeLock) {
-                        writeLock.notifyAll();
-                    }
-                }
-            } else {
-                frameCache.add(frame);
-                synchronized (writeLock) {
-                    writeLock.notifyAll();
-                }
+            if (needToFindKeyFrame && !frame.isKeyFrame) {
+                // wait for a key frame before starting to write
+                return;
+            }
+            needToFindKeyFrame = false;
+
+            // Copy the sample out of the codec's buffer. SrsEncoder releases the
+            // MediaCodec output buffer right after this call, which hands the same
+            // memory back to the encoder to be overwritten; queueing the original
+            // (even via duplicate()) would write corrupted data.
+            ByteBuffer copy = ByteBuffer.allocate(bi.size);
+            int oldPosition = bb.position();
+            int oldLimit = bb.limit();
+            bb.position(bi.offset);
+            bb.limit(bi.offset + bi.size);
+            copy.put(bb);
+            bb.position(oldPosition);
+            bb.limit(oldLimit);
+            copy.flip();
+            frame.bb = copy;
+            // Normalise the BufferInfo for the copy: all downstream code (annexb
+            // demuxer, addSample) indexes with bi.offset, which is now 0.
+            MediaCodec.BufferInfo copyInfo = new MediaCodec.BufferInfo();
+            copyInfo.set(0, bi.size, bi.presentationTimeUs, bi.flags);
+            frame.bi = copyInfo;
+
+            frameCache.add(frame);
+            synchronized (writeLock) {
+                writeLock.notifyAll();
             }
         }
     }
@@ -496,11 +599,21 @@ public class SrsMp4Muxer {
             trackId = id;
             isAudio = audio;
             if (!isAudio) {
-                sampleDurations.add((long) 3015);
-                duration = 3015;
+                // Derive the sample duration from the real frame rate carried in the
+                // MediaFormat, so the mp4 timing metadata matches the capture rate.
+                // 3015 (a fixed ~33.4fps) was wrong for every other rate and made
+                // files play at the wrong speed / stutter.
+                int fps = format.containsKey(MediaFormat.KEY_FRAME_RATE)
+                        ? format.getInteger(MediaFormat.KEY_FRAME_RATE) : SrsEncoder.vFps;
+                if (fps <= 0) {
+                    fps = 30;
+                }
+                timeScale = 90000;
+                long seedDuration = timeScale / fps;
+                sampleDurations.add(seedDuration);
+                duration = seedDuration;
                 width = format.getInteger(MediaFormat.KEY_WIDTH);
                 height = format.getInteger(MediaFormat.KEY_HEIGHT);
-                timeScale = 90000;
                 syncSamples = new LinkedList<>();
                 handler = "vide";
                 headerBox = new VideoMediaHeaderBox();
@@ -518,9 +631,13 @@ public class SrsMp4Muxer {
 
                     AvcConfigurationBox avcConfigurationBox = new AvcConfigurationBox();
                     avcConfigurationBox.setConfigurationVersion(1);
-                    avcConfigurationBox.setAvcProfileIndication((int) h264_sps.get(1));
+                    // Guard: a truncated SPS would previously throw here and abort the
+                    // whole finalize, leaving an unplayable file.
+                    avcConfigurationBox.setAvcProfileIndication(
+                            (h264_sps != null && h264_sps.limit() > 1) ? (int) h264_sps.get(1) : 0x42);
                     avcConfigurationBox.setProfileCompatibility(0);
-                    avcConfigurationBox.setAvcLevelIndication((int) h264_sps.get(3));
+                    avcConfigurationBox.setAvcLevelIndication(
+                            (h264_sps != null && h264_sps.limit() > 3) ? (int) h264_sps.get(3) : 0x1f);
                     avcConfigurationBox.setLengthSizeMinusOne(3);
                     avcConfigurationBox.setSequenceParameterSets(spsList);
                     avcConfigurationBox.setPictureParameterSets(ppsList);
@@ -774,7 +891,7 @@ public class SrsMp4Muxer {
     private volatile long flushBytes = 0;
     private HashMap<Track, long[]> track2SampleSizes = new HashMap<>();
 
-    private void createMovie(File outputFile) {
+    private boolean createMovie(File outputFile) {
         try {
             fos = new FileOutputStream(outputFile);
             fc = fos.getChannel();
@@ -784,10 +901,33 @@ public class SrsMp4Muxer {
             FileTypeBox fileTypeBox = createFileTypeBox();
             fileTypeBox.getBox(fc);
             recFileSize += fileTypeBox.getSize();
+            return true;
         } catch (IOException e) {
             e.printStackTrace();
             mHandler.notifyRecordIOException(e);
+            // make sure nothing is left half-open, otherwise the next record() leaks
+            closeQuietly();
+            return false;
         }
+    }
+
+    private void closeQuietly() {
+        try {
+            if (fc != null) {
+                fc.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        try {
+            if (fos != null) {
+                fos.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        fc = null;
+        fos = null;
     }
 
     private void writeSampleData(ByteBuffer byteBuf, MediaCodec.BufferInfo bi, boolean isAudio) {
@@ -831,6 +971,11 @@ public class SrsMp4Muxer {
 
     private void finishMovie() {
         try {
+            if (fos == null || fc == null || mdat == null) {
+                // nothing was ever actually opened/written; nothing to finalize
+                closeQuietly();
+                return;
+            }
             if (flushBytes > 0) {
                 fos.flush();
                 flushBytes = 0;
@@ -861,6 +1006,9 @@ public class SrsMp4Muxer {
 
             fc.close();
             fos.close();
+            fc = null;
+            fos = null;
+            mdat = null;
             mp4Movie.getTracks().clear();
             track2SampleSizes.clear();
             recFileSize = 0;
