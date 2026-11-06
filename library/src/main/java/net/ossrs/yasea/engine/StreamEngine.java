@@ -175,7 +175,7 @@ public final class StreamEngine implements MediaEncoders.Sink, VideoSource.Liste
         s.setListener(this);
         sources.add(s);
         compositor.addSource(s);
-        layers.add(new SourceLayer(s));
+        insertSourceLayer(new SourceLayer(s));
         if (autoArrange) {
             arrangeAuto();
         }
@@ -235,11 +235,22 @@ public final class StreamEngine implements MediaEncoders.Sink, VideoSource.Liste
                 int at = layers.indexOf(oldLayer);
                 layers.set(at, nl);
             } else {
-                layers.add(nl);
+                insertSourceLayer(nl);
             }
         }
         compositor.addSource(replacement);
         commitScene();
+    }
+
+    /** Video sources sit underneath text and logos, so a newly added camera never covers your overlays. */
+    private void insertSourceLayer(SourceLayer l) {
+        int at = 0;
+        for (int i = 0; i < layers.size(); i++) {
+            if (layers.get(i) instanceof SourceLayer) {
+                at = i + 1;
+            }
+        }
+        layers.add(at, l);
     }
 
     public synchronized List<VideoSource> getSources() {
@@ -451,6 +462,11 @@ public final class StreamEngine implements MediaEncoders.Sink, VideoSource.Liste
                 }
             }
         });
+    }
+
+    @Override
+    public void onSourceInfo(VideoSource source, String message) {
+        postMessage(message);
     }
 
     @Override

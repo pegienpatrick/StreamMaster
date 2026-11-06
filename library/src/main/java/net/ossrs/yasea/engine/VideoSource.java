@@ -17,6 +17,9 @@ public abstract class VideoSource {
     /** Listener for source lifecycle problems (camera lost, permission revoked...). */
     public interface Listener {
         void onSourceError(VideoSource source, String message);
+
+        /** Non-fatal notice (for example the camera cannot reach the requested resolution). */
+        void onSourceInfo(VideoSource source, String message);
     }
 
     public final String id;

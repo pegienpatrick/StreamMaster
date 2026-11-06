@@ -20,6 +20,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -97,6 +98,8 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
     private View blackout, bottomBar, topBar;
 
     private SceneEditorView editor;
+    private DestinationStore dests;
+    private TextView chipDest;
     private View layerBar;
     private boolean inBlackout;
     private int blackoutTaps;
@@ -111,6 +114,9 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = new Prefs(this);
+        prefs.resolvedPortrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+        dests = new DestinationStore(this);
+        dests.migrateLegacy(prefs);
         applyOrientationLock();
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -134,6 +140,9 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
         chipLive = findViewById(R.id.chipLive);
         chipRec = findViewById(R.id.chipRec);
         chipStats = findViewById(R.id.chipStats);
+        chipDest = findViewById(R.id.chipDest);
+        chipDest.setOnClickListener(v -> showDestinations());
+        refreshDestination();
         banner = findViewById(R.id.banner);
         micMeter = findViewById(R.id.micMeter);
         btnMic = findViewById(R.id.btnMic);
@@ -143,6 +152,17 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
         bottomBar = findViewById(R.id.bottomBar);
         topBar = findViewById(R.id.topBar);
 
+        bottomBar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, orr, ob) -> {
+            // keep the layer toolbar just above whatever height the bottom bar ended up with
+            android.widget.FrameLayout.LayoutParams lp =
+                (android.widget.FrameLayout.LayoutParams) layerBar.getLayoutParams();
+            int want = (v.getHeight()) + ((android.widget.FrameLayout.LayoutParams) v.getLayoutParams()).bottomMargin + dp(10);
+            if (lp.bottomMargin != want) {
+                lp.bottomMargin = want;
+                layerBar.setLayoutParams(lp);
+            }
+        });
+        applyResponsiveLayout();
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root), (v, insets) -> {
             androidx.core.graphics.Insets bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
@@ -281,7 +301,8 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             int[] req = cameraRequest();
             boolean restored = hasCamera() && SceneStore.restore(this, engine, req[0], req[1],
                 prefs.fps(), contentRotationDegrees());
-            if (!restored && engine.getSources().isEmpty() && hasCamera()) {
+            // a restored scene may hold only text (screen share is never restored): always have a video source
+            if (engine.getSources().isEmpty() && hasCamera()) {
                 addDefaultCamera();
             }
         }
@@ -650,10 +671,10 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             engine.stopStream();
             return;
         }
-        String url = prefs.url().trim();
-        if (!(url.startsWith("rtmp://") || url.startsWith("rtmps://"))) {
-            showBanner("Enter your rtmp:// or rtmps:// stream URL first");
-            showSettings();
+        String url = dests.activeUrl();
+        if (url == null) {
+            showBanner("Choose where to stream and enter your stream key first");
+            showDestinations();
             return;
         }
         if (!hasCamera() && engine.getSources().isEmpty()) {
@@ -704,7 +725,7 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
 
     private void showSettings() {
         View v = getLayoutInflater().inflate(R.layout.dialog_settings, null);
-        final EditText url = v.findViewById(R.id.setUrl);
+        v.findViewById(R.id.btnDestination).setOnClickListener(x -> showDestinations());
         final Spinner quality = v.findViewById(R.id.setQuality);
         final Spinner fps = v.findViewById(R.id.setFps);
         final Spinner orient = v.findViewById(R.id.setOrientation);
@@ -727,11 +748,13 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             qList.add(shortSide);
             qNames.add(allNames[i] + (ok ? "" : "  (not supported by this phone)"));
         }
+        String camLimits = Camera2Source.describeLimits(this);
         int[] h264 = EncoderCaps.maxSize(MediaEncoders.VCODEC);
         int[] hevc = EncoderCaps.maxSize("video/hevc");
         ((TextView) v.findViewById(R.id.capNote)).setText(String.format(Locale.US,
-            "This phone's encoder limit: H.264 up to %dx%d, HEVC up to %dx%d. "
-                + "Streaming and recording use H.264.", h264[0], h264[1], hevc[0], hevc[1]));
+            "Encoder: H.264 up to %dx%d, HEVC up to %dx%d (streaming and recording use H.264).\n"
+                + "Cameras can deliver at most: %s. A bigger setting is scaled up from the camera, "
+                + "so it will not look sharper.", h264[0], h264[1], hevc[0], hevc[1], camLimits));
         final int[] qVals = new int[qList.size()];
         for (int i = 0; i < qVals.length; i++) {
             qVals[i] = qList.get(i);
@@ -740,9 +763,8 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
         fps.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
             new String[]{"24 fps", "30 fps", "60 fps"}));
         orient.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-            new String[]{"Landscape", "Portrait"}));
+            new String[]{"Auto (follow the phone)", "Landscape", "Portrait"}));
 
-        url.setText(prefs.url());
         for (int i = 0; i < qVals.length; i++) {
             if (qVals[i] == prefs.quality()) {
                 quality.setSelection(i);
@@ -753,7 +775,7 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
                 fps.setSelection(i);
             }
         }
-        orient.setSelection(prefs.portrait() ? 1 : 0);
+        orient.setSelection(prefs.orientMode());
         bitrate.setText(String.valueOf(prefs.bitrateKbps()));
         adaptive.setChecked(prefs.adaptive());
         final MaterialSwitch kioskSw = v.findViewById(R.id.setKiosk);
@@ -777,12 +799,15 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             .setTitle("Settings")
             .setView(v)
             .setPositiveButton("Save", (d, w) -> {
-                prefs.url(url.getText().toString().trim());
                 prefs.quality(qVals[quality.getSelectedItemPosition()]);
                 prefs.fps(fVals[fps.getSelectedItemPosition()]);
-                boolean portrait = orient.getSelectedItemPosition() == 1;
-                boolean orientationChanged = portrait != prefs.portrait();
-                prefs.portrait(portrait);
+                int mode = orient.getSelectedItemPosition();
+                boolean orientationChanged = mode != prefs.orientMode();
+                prefs.orientMode(mode);
+                if (mode == Prefs.ORIENT_AUTO) {
+                    prefs.resolvedPortrait = getResources().getConfiguration().orientation
+                        == Configuration.ORIENTATION_PORTRAIT;
+                }
                 try {
                     prefs.bitrateKbps(Integer.parseInt(bitrate.getText().toString().trim()));
                 } catch (NumberFormatException e) {
@@ -821,6 +846,42 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             })
             .setNegativeButton("Cancel", null)
             .show();
+    }
+
+    // ------------------------------------------------------------ destinations
+
+    private final DestinationSheet.Host destHost = new DestinationSheet.Host() {
+        @Override
+        public void destinationChanged() {
+            refreshDestination();
+        }
+
+        @Override
+        public void goLiveRequested() {
+            if (engine != null && !engine.isStreaming()) {
+                toggleLive();
+            }
+        }
+    };
+
+    private void showDestinations() {
+        new DestinationSheet(this, dests, destHost).show();
+    }
+
+    /** Top-bar chip: platform colour dot + name of where "Go live" will send the stream. */
+    private void refreshDestination() {
+        Destination d = dests.active();
+        if (d == null) {
+            chipDest.setText("Set destination");
+            chipDest.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+            return;
+        }
+        android.graphics.drawable.GradientDrawable dot = new android.graphics.drawable.GradientDrawable();
+        dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        dot.setColor(d.platform.color);
+        dot.setSize(dp(10), dp(10));
+        chipDest.setCompoundDrawablesWithIntrinsicBounds(dot, null, null, null);
+        chipDest.setText(d.name + (d.url() == null ? "  \u26A0" : ""));
     }
 
     // ------------------------------------------------------------ profiles
@@ -1090,8 +1151,8 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
                     showBanner("Choose an exit PIN of at least 4 digits");
                     return;
                 }
-                if (live.isChecked() && !(prefs.url().startsWith("rtmp://") || prefs.url().startsWith("rtmps://"))) {
-                    showBanner("Set your stream URL in Settings first, or turn off Stream live");
+                if (live.isChecked() && dests.activeUrl() == null) {
+                    showBanner("Set a stream destination and key first (tap the destination chip), or turn off Stream live");
                     return;
                 }
                 prefs.kioskPin(p);
@@ -1245,9 +1306,17 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
     // ------------------------------------------------------------ orientation
 
     private void applyOrientationLock() {
-        setRequestedOrientation(prefs.portrait()
-            ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        // Auto (default): the screen rotates freely and the stream follows. Landscape/Portrait are opt-in locks.
+        switch (prefs.orientMode()) {
+            case Prefs.ORIENT_LANDSCAPE:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                break;
+            case Prefs.ORIENT_PORTRAIT:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+                break;
+            default:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+        }
     }
 
     /**
@@ -1270,10 +1339,20 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
                     // listener angle is the device's clockwise rotation; Surface rotation is the opposite sense
                     int d = ((360 - ((angle + 45) / 90) * 90) % 360);
                     if (d != physicalRotation) {
+                        boolean live = engine != null && (engine.isStreaming() || engine.isRecording());
+                        if (live) {
+                            return; // orientation is fixed for the duration of a stream or recording
+                        }
                         physicalRotation = d;
-                        android.util.Log.i("StudioActivity", "physical rotation=" + d + " display=" + displayRotationDegrees());
                         if (engine != null) {
                             engine.onDisplayRotation(d);
+                            boolean portraitNow = d == 0 || d == 180;
+                            if (prefs.orientMode() == Prefs.ORIENT_AUTO && portraitNow != prefs.resolvedPortrait) {
+                                prefs.resolvedPortrait = portraitNow;
+                                engine.setVideoConfig(prefs.width(), prefs.height(), prefs.fps(), prefs.effectiveBitrate());
+                                applyLayout();
+                                updatePipParams();
+                            }
                         }
                     }
                 }
@@ -1301,6 +1380,7 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        applyResponsiveLayout();
         if (engine != null) {
             engine.onDisplayRotation(contentRotationDegrees());
         }
@@ -1321,7 +1401,7 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
             return;
         }
         StreamEngine.Stats s = engine.getStats();
-        chipStats.setText(String.format(Locale.US, "%dx%d  %d fps  %.1f Mbps%s",
+        chipStats.setText(String.format(Locale.US, "%dx%d \u00B7 %d fps \u00B7 %.1f Mbps%s",
             engine.getOutputWidth(), engine.getOutputHeight(), s.renderFps,
             s.videoBitrateKbps / 1000f,
             engine.isStreaming() && s.cachedFrames > 2 ? "  ⚠ " + s.cachedFrames + " queued" : ""));
@@ -1357,6 +1437,30 @@ public class StudioActivity extends AppCompatActivity implements StreamEngine.Li
 
     private static String mb(long bytes) {
         return String.format(Locale.US, "%.1f MB", bytes / 1048576f);
+    }
+
+    /**
+     * Narrow screens (phones in portrait): bottom controls stack in two rows and span the
+     * width. Wide screens keep a single compact row.
+     */
+    private void applyResponsiveLayout() {
+        int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels
+            / getResources().getDisplayMetrics().density);
+        boolean narrow = widthDp < 560;
+        android.widget.FrameLayout.LayoutParams lp =
+            (android.widget.FrameLayout.LayoutParams) bottomBar.getLayoutParams();
+        lp.width = narrow ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+        lp.leftMargin = lp.rightMargin = narrow ? dp(10) : 0;
+        bottomBar.setLayoutParams(lp);
+        ((LinearLayout) bottomBar).setOrientation(narrow ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        View tools = findViewById(R.id.toolsScroll);
+        View main = findViewById(R.id.mainRow);
+        LinearLayout.LayoutParams tl = (LinearLayout.LayoutParams) tools.getLayoutParams();
+        LinearLayout.LayoutParams ml = (LinearLayout.LayoutParams) main.getLayoutParams();
+        tl.width = narrow ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+        ml.width = narrow ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT;
+        tools.setLayoutParams(tl);
+        main.setLayoutParams(ml);
     }
 
     private int dp(int v) {

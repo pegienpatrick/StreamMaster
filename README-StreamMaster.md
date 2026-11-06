@@ -165,9 +165,11 @@ the same on every phone.
 
 ---
 
-## 6. Why text can appear inverted (a known bug)
+## 6. Why text appeared inverted (fixed)
 
-This is a real bug in the code, not a device quirk.
+This was a real bug in the code, not a device quirk. It is now fixed (the bitmap's vertical
+texture coordinate is flipped in `Compositor.drawBitmapLayer`); the explanation is kept
+because it is a classic GPU trap.
 
 Text, tickers and logos are drawn into an Android `Bitmap` with a normal canvas, then
 uploaded to the GPU with `GLUtils.texImage2D`. A bitmap's first row is its **top**. When
@@ -180,10 +182,8 @@ no such matrix: the compositor passes an identity matrix for them. So the top of
 bitmap lands at the bottom of the screen, and **text and logos come out upside-down
 (flipped vertically)**. A ticker would scroll correctly sideways but also be upside-down.
 
-The fix is small and local: for bitmap layers, flip the vertical texture coordinate once
-(for example, use a texture matrix that maps `v` to `1 - v` instead of the identity
-matrix, or draw the quad with flipped coordinates). It has not been applied because this
-document was requested as explanation only. Logos are affected the same way as text.
+The fix: for bitmap layers the texture matrix now maps `v` to `1 - v` instead of being the
+identity. Logos were affected the same way as text and are fixed by the same change.
 
 ---
 
@@ -259,7 +259,6 @@ document was requested as explanation only. Logos are affected the same way as t
 
 ## 10. Known issues and not-yet-done
 
-- **Text, ticker and logo layers are upside-down** (section 6). Not yet fixed.
 - Streaming to a real server and recording a long 4K file were not yet tested end to end.
 - A history screen for finished recordings, USB camera support, HEVC/8K recording, and
   automatic file splitting for long kiosk recordings are not built.

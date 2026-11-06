@@ -36,12 +36,25 @@ public final class Prefs {
         sp.edit().putInt("fps", v).apply();
     }
 
-    public boolean portrait() {
-        return sp.getBoolean("portrait", false);
+    public static final int ORIENT_AUTO = 0;
+    public static final int ORIENT_LANDSCAPE = 1;
+    public static final int ORIENT_PORTRAIT = 2;
+
+    /** AUTO follows how the phone is held (output flips with it while idle); the others lock it. */
+    public int orientMode() {
+        return sp.getInt("orient", ORIENT_AUTO);
     }
 
-    public void portrait(boolean v) {
-        sp.edit().putBoolean("portrait", v).apply();
+    public void orientMode(int v) {
+        sp.edit().putInt("orient", v).apply();
+    }
+
+    /** Runtime state for AUTO: true when the phone is currently held upright. */
+    public volatile boolean resolvedPortrait;
+
+    public boolean portrait() {
+        int m = orientMode();
+        return m == ORIENT_PORTRAIT || (m == ORIENT_AUTO && resolvedPortrait);
     }
 
     /** 0 = automatic from resolution and fps. */
@@ -138,7 +151,7 @@ public final class Prefs {
             if (includeUrl) {
                 o.put("url", url());
             }
-            o.put("quality", quality()).put("fps", fps()).put("portrait", portrait());
+            o.put("quality", quality()).put("fps", fps()).put("orient", orientMode());
             o.put("bitrate", bitrateKbps()).put("adaptive", adaptive()).put("autoPip", autoPip());
             o.put("kioskAutoStream", kioskAutoStream()).put("kioskAutoRecord", kioskAutoRecord());
             o.put("kioskOnBoot", kioskOnBoot()).put("kioskDark", kioskDark());
@@ -153,7 +166,7 @@ public final class Prefs {
         }
         quality(o.optInt("quality", quality()));
         fps(o.optInt("fps", fps()));
-        portrait(o.optBoolean("portrait", portrait()));
+        orientMode(o.optInt("orient", orientMode()));
         bitrateKbps(o.optInt("bitrate", bitrateKbps()));
         adaptive(o.optBoolean("adaptive", adaptive()));
         autoPip(o.optBoolean("autoPip", autoPip()));

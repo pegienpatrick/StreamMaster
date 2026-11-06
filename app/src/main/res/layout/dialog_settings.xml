@@ -17,14 +17,12 @@
             android:layout_marginBottom="12dp"
             android:text="Profiles: save, load, share" />
 
-        <EditText
-            android:id="@+id/setUrl"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDestination"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="rtmp:// or rtmps://server/app/key"
-            android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:maxLines="2" />
+            android:text="Stream destination and key" />
 
         <TextView style="@style/SettingLabel" android:text="Quality" />
         <TextView android:id="@+id/capNote" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/on_surface_dim" android:textSize="11sp" />

@@ -110,6 +110,7 @@ public final class Camera2Source extends VideoSource {
                 Integer f = cc.get(CameraCharacteristics.LENS_FACING);
                 int facing = f == null ? -1 : f;
                 out.add(new Info(id, null, labelFor(id, f), facing));
+                logMax(cm, cc, id);
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     for (String pid : cc.getPhysicalCameraIds()) {
                         if (top.contains(pid)) {
@@ -123,6 +124,60 @@ public final class Camera2Source extends VideoSource {
             // no camera service: return what we have
         }
         return out;
+    }
+
+    /** Human summary of the biggest 16:9 picture each side's cameras can give, e.g. "Back 2576x1449, Front 3264x1836". */
+    public static String describeLimits(Context ctx) {
+        int[] bestBack = {0, 0}, bestFront = {0, 0};
+        CameraManager cm = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
+        try {
+            for (String id : cm.getCameraIdList()) {
+                CameraCharacteristics cc = cm.getCameraCharacteristics(id);
+                StreamConfigurationMap map = cc.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                Integer f = cc.get(CameraCharacteristics.LENS_FACING);
+                if (map == null || map.getOutputSizes(SurfaceTexture.class) == null) {
+                    continue;
+                }
+                int[] dst = (f != null && f == CameraCharacteristics.LENS_FACING_FRONT) ? bestFront : bestBack;
+                for (Size z : map.getOutputSizes(SurfaceTexture.class)) {
+                    int w = z.getWidth();
+                    int h = Math.min(z.getHeight(), w * 9 / 16);   // 16:9 window inside this size
+                    if ((long) w * h > (long) dst[0] * dst[1]) {
+                        dst[0] = w;
+                        dst[1] = h;
+                    }
+                }
+            }
+        } catch (CameraAccessException | RuntimeException ignored) {
+        }
+        return "Back " + bestBack[0] + "x" + bestBack[1] + ", front " + bestFront[0] + "x" + bestFront[1];
+    }
+
+    /** Diagnostics: the largest video-capable size each camera reports. */
+    private static void logMax(CameraManager cm, CameraCharacteristics cc, String id) {
+        try {
+            StreamConfigurationMap map = cc.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Size best = null;
+            if (map != null && map.getOutputSizes(SurfaceTexture.class) != null) {
+                for (Size z : map.getOutputSizes(SurfaceTexture.class)) {
+                    if (best == null || (long) z.getWidth() * z.getHeight() > (long) best.getWidth() * best.getHeight()) {
+                        best = z;
+                    }
+                }
+            }
+            boolean p2160 = false;
+            try {
+                p2160 = android.media.CamcorderProfile.hasProfile(Integer.parseInt(id),
+                    android.media.CamcorderProfile.QUALITY_2160P);
+            } catch (NumberFormatException ignored) {
+            }
+            Size pix = cc.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE);
+            Integer facing = cc.get(CameraCharacteristics.LENS_FACING);
+            android.util.Log.i("Camera2Source", "LIST cam " + id + " facing=" + facing + " sensor=" + pix
+                + " maxVideoSurface=" + best + " camcorder2160p=" + p2160);
+        } catch (RuntimeException e) {
+            // diagnostics only
+        }
     }
 
     private static String lensName(CameraManager cm, String physicalId, Integer facing) {
@@ -200,6 +255,14 @@ public final class Camera2Source extends VideoSource {
         final CameraManager cm = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         try {
             Size size = chooseSize(cm);
+            logCapabilities(cm, size);
+            if ((long) size.getWidth() * size.getHeight() < (long) reqW * reqH * 0.8) {
+                Listener l0 = listener;
+                if (l0 != null) {
+                    l0.onSourceInfo(this, label + " can only deliver " + size.getWidth() + "x" + size.getHeight()
+                        + ", so it is scaled up to the stream size. Lower the quality to match.");
+                }
+            }
             width = size.getWidth();
             height = size.getHeight();
             surfaceTexture.setDefaultBufferSize(width, height);
@@ -317,6 +380,48 @@ public final class Camera2Source extends VideoSource {
         }
     }
 
+    /** Diagnostics: what this camera can really deliver, so size problems can be understood. */
+    private void logCapabilities(CameraManager cm, Size chosen) {
+        try {
+            CameraCharacteristics cc = characteristics(cm);
+            StreamConfigurationMap map = cc.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            StringBuilder sb = new StringBuilder();
+            if (map != null) {
+                Size[] st = map.getOutputSizes(SurfaceTexture.class);
+                Size[] rec = map.getOutputSizes(android.media.MediaRecorder.class);
+                sb.append("surfaceTexture sizes>=1080p: ").append(bigSizes(st));
+                sb.append(" | recorder sizes>=1080p: ").append(bigSizes(rec));
+                Size[] hr = map.getHighResolutionOutputSizes(android.graphics.ImageFormat.PRIVATE);
+                sb.append(" | highRes(private): ").append(hr == null ? "none" : bigSizes(hr));
+            }
+            android.util.Size pixel = cc.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE);
+            boolean p2160 = false;
+            try {
+                p2160 = android.media.CamcorderProfile.hasProfile(Integer.parseInt(cameraId),
+                    android.media.CamcorderProfile.QUALITY_2160P);
+            } catch (NumberFormatException ignored) {
+            }
+            android.util.Log.i("Camera2Source", "cam " + cameraId + (physicalId != null ? "/" + physicalId : "")
+                + ": sensor " + pixel + ", requested " + reqW + "x" + reqH + " -> chose " + chosen
+                + ", camcorder 2160p profile=" + p2160 + " :: " + sb);
+        } catch (CameraAccessException | RuntimeException e) {
+            android.util.Log.w("Camera2Source", "capability log failed", e);
+        }
+    }
+
+    private static String bigSizes(Size[] sizes) {
+        if (sizes == null) {
+            return "none";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Size z : sizes) {
+            if (z.getWidth() >= 1920) {
+                sb.append(z.getWidth()).append('x').append(z.getHeight()).append(' ');
+            }
+        }
+        return sb.length() == 0 ? "none" : sb.toString().trim();
+    }
+
     private CameraCharacteristics characteristics(CameraManager cm) throws CameraAccessException {
         if (physicalId != null) {
             try {
@@ -350,13 +455,20 @@ public final class Camera2Source extends VideoSource {
             }
 
             private double score(Size s) {
-                double aspectDiff = Math.abs((float) s.getWidth() / s.getHeight() - want);
-                long area = (long) s.getWidth() * s.getHeight();
-                double areaPenalty = Math.abs(Math.log((double) area / wantArea));
-                if (area > wantArea) {
-                    areaPenalty += 0.5; // prefer not upscaling past the request
+                // Judge each mode by the largest picture of the REQUESTED shape it can give
+                // (a 4:3 mode cropped to 16:9 still has far more pixels than a plain 1080p mode).
+                double effW = Math.min(s.getWidth(), s.getHeight() * (double) want);
+                double effH = effW / want;
+                double effArea = effW * effH;
+                double penalty = Math.abs(Math.log(effArea / wantArea));
+                if (effArea < wantArea) {
+                    penalty += 0.3;            // short of the request: worse than slightly over
+                } else if (effArea > wantArea * 1.5) {
+                    penalty += 0.3;            // far beyond the request wastes GPU and heat
                 }
-                return aspectDiff * 10 + areaPenalty;
+                // tiny nudge to prefer a mode that already has the right shape (no crop needed)
+                penalty += Math.abs((double) s.getWidth() / s.getHeight() - want) * 0.02;
+                return penalty;
             }
         });
         return list.get(0);

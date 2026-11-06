@@ -546,7 +546,11 @@ public final class Compositor {
         GLES20.glUseProgram(prog2d);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         bindQuad(aPos2, aTex2);
+        // A bitmap's first row is its TOP but texture row 0 is drawn at the quad's bottom:
+        // flip v (v' = 1 - v) so text and logos are not upside-down.
         Matrix.setIdentityM(tmpB, 0);
+        Matrix.translateM(tmpB, 0, 0f, 1f, 0f);
+        Matrix.scaleM(tmpB, 0, 1f, -1f, 1f);
         GLES20.glUniformMatrix4fv(uTex2, 1, false, tmpB, 0);
         float a = l.opacity;
 

@@ -16,100 +16,130 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- top status row -->
+    <!-- top: row 1 = destination + actions, row 2 = live status -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:padding="12dp">
 
-        <TextView
-            android:id="@+id/chipLive"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/chip_live_bg"
-            android:paddingStart="12dp"
-            android:paddingTop="5dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="5dp"
-            android:text="LIVE 00:00"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/chipRec"
-            android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/chipDest"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/chip_bg"
+                android:drawablePadding="8dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingTop="9dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="9dp"
+                android:text="Set destination"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/btnKiosk"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/icon_button_background"
+                android:contentDescription="Kiosk mode"
+                android:src="@drawable/ic_lock" />
+
+            <ImageButton
+                android:id="@+id/btnPip"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/icon_button_background"
+                android:contentDescription="Picture in picture"
+                android:src="@drawable/ic_pip" />
+
+            <ImageButton
+                android:id="@+id/btnSettings"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/icon_button_background"
+                android:contentDescription="Settings"
+                android:src="@drawable/ic_settings" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/chip_bg"
-            android:drawablePadding="6dp"
-            android:paddingStart="12dp"
-            android:paddingTop="5dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="5dp"
-            android:text="REC 00:00"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/chipStats"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/chip_bg"
-            android:paddingStart="12dp"
-            android:paddingTop="5dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="5dp"
-            android:textColor="@color/on_surface_dim"
-            android:textSize="12sp" />
+            <TextView
+                android:id="@+id/chipLive"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/chip_live_bg"
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
+                android:text="LIVE 00:00"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <TextView
+                android:id="@+id/chipRec"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/chip_bg"
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
+                android:text="REC 00:00"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
 
-        <ProgressBar
-            android:id="@+id/micMeter"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="56dp"
-            android:layout_height="6dp"
-            android:layout_marginEnd="12dp"
-            android:max="100"
-            android:progressTint="@color/ok_green" />
+            <TextView
+                android:id="@+id/chipStats"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/chip_bg"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
+                android:textColor="@color/on_surface_dim"
+                android:textSize="11sp" />
 
-        <ImageButton
-            android:id="@+id/btnKiosk"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Kiosk mode"
-            android:src="@drawable/ic_lock" />
-
-        <ImageButton
-            android:id="@+id/btnPip"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Picture in picture"
-            android:src="@drawable/ic_pip" />
-
-        <ImageButton
-            android:id="@+id/btnSettings"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Settings"
-            android:src="@drawable/ic_settings" />
+            <ProgressBar
+                android:id="@+id/micMeter"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="48dp"
+                android:layout_height="6dp"
+                android:layout_marginStart="10dp"
+                android:max="100"
+                android:progressTint="@color/ok_green" />
+        </LinearLayout>
     </LinearLayout>
 
     <TextView
@@ -189,7 +219,7 @@
         </LinearLayout>
     </HorizontalScrollView>
 
-    <!-- bottom control bar -->
+    <!-- bottom: tools (scrollable) + record / go live. On phones these stack in two rows. -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="wrap_content"
@@ -197,83 +227,108 @@
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="20dp"
         android:background="@drawable/bar_bg"
-        android:gravity="center_vertical"
+        android:gravity="center"
         android:orientation="horizontal"
         android:padding="10dp">
 
-        <ImageButton
-            android:id="@+id/btnSources"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Sources"
-            android:src="@drawable/ic_sources" />
-
-        <ImageButton
-            android:id="@+id/btnFlip"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Switch camera"
-            android:src="@drawable/ic_flip_camera" />
-
-        <ImageButton
-            android:id="@+id/btnText"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Add text, ticker or logo"
-            android:src="@drawable/ic_text" />
-
-        <ImageButton
-            android:id="@+id/btnLayers"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Layers and scene"
-            android:src="@drawable/ic_layout" />
-
-        <ImageButton
-            android:id="@+id/btnMic"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Mute microphone"
-            android:src="@drawable/ic_mic" />
-
-        <ImageButton
-            android:id="@+id/btnRecord"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Record"
-            android:src="@drawable/ic_record" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnLive"
+        <HorizontalScrollView
+            android:id="@+id/toolsScroll"
             android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:layout_marginStart="6dp"
-            android:layout_marginEnd="4dp"
-            android:text="GO LIVE"
-            android:textStyle="bold"
-            app:backgroundTint="@color/live_red"
-            app:cornerRadius="28dp" />
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
 
-        <ImageButton
-            android:id="@+id/btnBlackout"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/icon_button_background"
-            android:contentDescription="Black screen mode"
-            android:src="@drawable/ic_moon" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/btnSources"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Sources"
+                    android:src="@drawable/ic_sources" />
+
+                <ImageButton
+                    android:id="@+id/btnFlip"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Switch camera"
+                    android:src="@drawable/ic_flip_camera" />
+
+                <ImageButton
+                    android:id="@+id/btnText"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Add text, ticker or logo"
+                    android:src="@drawable/ic_text" />
+
+                <ImageButton
+                    android:id="@+id/btnLayers"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Layers and scene"
+                    android:src="@drawable/ic_layout" />
+
+                <ImageButton
+                    android:id="@+id/btnMic"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Mute microphone"
+                    android:src="@drawable/ic_mic" />
+
+                <ImageButton
+                    android:id="@+id/btnBlackout"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/icon_button_background"
+                    android:contentDescription="Black screen mode"
+                    android:src="@drawable/ic_moon" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <LinearLayout
+            android:id="@+id/mainRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/btnRecord"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_margin="4dp"
+                android:background="@drawable/icon_button_background"
+                android:contentDescription="Record"
+                android:src="@drawable/ic_record" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnLive"
+                android:layout_width="0dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:minWidth="130dp"
+                android:text="GO LIVE"
+                android:textStyle="bold"
+                app:backgroundTint="@color/live_red"
+                app:cornerRadius="28dp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- black-screen overlay: GPU preview detached, brightness minimal -->
